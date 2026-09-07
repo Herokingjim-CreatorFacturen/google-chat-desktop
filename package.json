@@ -1,7 +1,7 @@
 {
   "name": "google-chat-desktop",
   "productName": "Google Chat",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Desktop wrapper for Google Chat with native notifications, VIP sounds and automatic updates.",
   "author": "Jimmy de Heus",
   "repository": {
