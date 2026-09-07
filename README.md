@@ -82,6 +82,16 @@ The token needs **Contents: Read and write** on this repository — nothing else
 "Public repositories" access is read-only and will fail at the upload step with
 a 401.
 
+**Git needs an identity**, or `npm.cmd version patch` edits `package.json` and
+then aborts before committing — leaving the bump uncommitted and untagged while
+the build carries on regardless. Already configured at repo scope here; if you
+clone this somewhere else:
+
+```powershell
+git config user.name "Jimmy de Heus"
+git config user.email "herokingjim@gmail.com"
+```
+
 ---
 
 ## Releasing a new version
