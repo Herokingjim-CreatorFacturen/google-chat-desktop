@@ -6,7 +6,7 @@
   "author": "Jimmy de Heus",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CHANGE-ME/google-chat-desktop.git"
+    "url": "https://github.com/herokingjim/google-chat-desktop.git"
   },
   "main": "main.js",
   "scripts": {

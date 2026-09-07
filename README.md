@@ -7,39 +7,41 @@ per-person ("VIP") alert sounds, an unread taskbar badge, and automatic updates.
 
 ## One-time setup before the first release
 
-Automatic updates need somewhere to fetch from. This project is configured to use
-**GitHub Releases**.
+Automatic updates fetch from **GitHub Releases** at
+`github.com/herokingjim/google-chat-desktop`.
 
-### 1. Point it at your repository
+### Already done
 
-Two places currently say `CHANGE-ME` and must be corrected together:
+* `repository.url` in `package.json` points at that repo.
+* The `origin` git remote is set to match.
 
-* `package.json` → `repository.url`
-* the git remote
+`electron-builder` reads `repository.url` to write `app-update.yml` into the
+installer, which is what tells an installed copy where to look. The two must stay
+in agreement — if they drift, every client silently 404s on its update check.
 
-```bash
-git remote add origin https://github.com/YOUR-USERNAME/google-chat-desktop.git
-```
+### Still to do
 
-Then edit `repository.url` in `package.json` to the same address. `electron-builder`
-reads it to write `app-update.yml` into the installer, which is what tells an
-installed copy where to look. Get it wrong and every client silently 404s
-(exactly what the log shows today).
-
-### 2. Give the build a GitHub token
-
-Create a personal access token with the `repo` scope and expose it as `GH_TOKEN`
-when publishing. Do not commit it — `.env` is already git-ignored.
+**1. Create the repository.** It does not exist yet:
 
 ```bash
-export GH_TOKEN=ghp_xxxxxxxxxxxx
+git push -u origin master
 ```
 
-### 3. If the repository is private
+That prompts for GitHub credentials and creates nothing on its own — create
+`google-chat-desktop` on github.com first, then push.
 
-Clients cannot read release assets from a private repo without credentials. Either
-make the repo public (the installer contains no secrets) or switch to the
-`generic` provider pointed at an internal HTTPS server.
+**2. Decide public or private.** Installed copies fetch release assets
+anonymously, so a **public** repo is the path of least resistance. The installer
+contains no secrets. A private repo means embedding a read token in the shipped
+app — at which point an internal HTTPS server with the `generic` provider is the
+better trade.
+
+**3. Create a GitHub token** with the `repo` scope and expose it as `GH_TOKEN`
+when publishing. `.env` is git-ignored; never commit it.
+
+```bash
+export GH_TOKEN=your_token_here
+```
 
 ---
 
