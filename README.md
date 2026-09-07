@@ -19,34 +19,40 @@ embedded in the app.
 * `repository.url` matches.
 * The `origin` remote is set, and the local branch is `main` to match the repo's
   default.
+* The code is pushed; `main` tracks `origin/main`.
 
 Verified against the live repo: the packaged app reaches it and reports
 *"No published versions"* rather than a 404, which is the correct response to a
 repo with no releases yet.
 
-### Still to do
-
-**1. Push the code.** The repo is currently empty:
-
-```bash
-git push -u origin main
-```
-
-> **On transport:** you supplied the `git@github.com:` SSH address, but this
-> machine has no SSH keys (`ssh -T git@github.com` → *Permission denied
-> (publickey)*), so `origin` is set to HTTPS instead — Git Credential Manager is
-> already configured and will handle the sign-in. To switch to SSH later,
-> generate a key, add it to GitHub, then:
-> ```bash
+> **On transport:** `origin` uses **HTTPS**, not the `git@github.com:` SSH
+> address. This machine has no SSH keys — `ssh -T git@github.com` returns
+> *Permission denied (publickey)* — so SSH pushes fail. Git Credential Manager
+> handles HTTPS sign-in instead. To move to SSH later, generate a key, add it to
+> GitHub, then:
+>
+> ```powershell
 > git remote set-url origin git@github.com:Herokingjim-CreatorFacturen/google-chat-desktop.git
 > ```
-> This only affects pushing. Clients always fetch updates over HTTPS regardless.
+>
+> This affects pushing only. Update clients always fetch over HTTPS regardless.
 
-**2. Create a GitHub token** with the `repo` scope and expose it as `GH_TOKEN`
+### Still to do
+
+**Create a GitHub token** with the `repo` scope and expose it as `GH_TOKEN`
 when publishing. `.env` is git-ignored; never commit it.
 
-```bash
-export GH_TOKEN=your_token_here
+This project is developed on Windows, so the commands below are **PowerShell**.
+`export` is a bash builtin and will fail here:
+
+```powershell
+$env:GH_TOKEN = "your_token_here"
+```
+
+That lasts for the current terminal only. To keep it across sessions:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GH_TOKEN", "your_token_here", "User")
 ```
 
 ---
