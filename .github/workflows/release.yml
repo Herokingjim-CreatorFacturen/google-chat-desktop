@@ -88,16 +88,39 @@ jobs:
                  Select-Object -First 1
           if (-not $rel) { Write-Error "No release found for tag $tag"; exit 1 }
 
-          $names = $rel.assets.name
-          Write-Host "Assets: $($names -join ', ')"
+          $assets = @($rel.assets)
+          Write-Host ("Assets: " + (($assets | ForEach-Object {
+            "$($_.name) [$($_.state), $([math]::Round($_.size / 1MB, 1)) MB]"
+          }) -join ', '))
 
+          # An asset whose upload failed part-way still comes back from the API
+          # with its name, so checking names alone proves nothing -- it has to
+          # have reached state 'uploaded'. Anything else shows as a broken or
+          # absent download on the release page.
+          $usable = @($assets | Where-Object { $_.state -eq 'uploaded' })
+          $stalled = @($assets | Where-Object { $_.state -ne 'uploaded' })
+          if ($stalled) {
+            Write-Error ("Assets stuck mid-upload: " + (($stalled | ForEach-Object {
+              "$($_.name) [$($_.state)]"
+            }) -join ', '))
+            exit 1
+          }
+
+          $names = @($usable | ForEach-Object { $_.name })
           $missing = @('.exe', '.exe.blockmap', 'latest.yml') | Where-Object {
             $suffix = $_
             -not ($names | Where-Object { $_.EndsWith($suffix) })
           }
           if ($missing) { Write-Error "Missing from the release: $($missing -join ', ')"; exit 1 }
 
-          Write-Host "All required assets present. Publish the draft when ready:"
+          # A truncated installer would still say 'uploaded'.
+          $exe = $usable | Where-Object { $_.name.EndsWith('.exe') } | Select-Object -First 1
+          if ($exe.size -lt 50MB) {
+            Write-Error "Installer is only $([math]::Round($exe.size / 1MB, 1)) MB -- expected ~95 MB. Upload was truncated."
+            exit 1
+          }
+
+          Write-Host "All required assets uploaded. Publish the draft when ready:"
           Write-Host $rel.html_url
 
       - name: Keep the installer as a build artifact
