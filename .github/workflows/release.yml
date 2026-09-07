@@ -1,0 +1,97 @@
+name: Release
+
+# Pushing a version tag builds the installer and uploads it to a DRAFT GitHub
+# release. Nothing reaches users until that draft is published by hand.
+#
+#   npm.cmd version patch      # bumps package.json, commits, tags
+#   git push --follow-tags     # pushes the commit and the tag -> triggers this
+#
+# No personal access token is involved: GITHUB_TOKEN is minted per run by
+# Actions and is scoped to this repository alone.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Two builds of the same version racing each other is how the 1.4.1 release
+# ended up with a mismatched manifest and no blockmap. Queue them instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify the tag matches package.json
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content package.json | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          if ($tag -ne $pkg) {
+            Write-Error "Tag $tag does not match package.json version $pkg. Refusing to publish a mislabelled release."
+            exit 1
+          }
+          Write-Host "Tag and package.json agree on $pkg"
+
+      - name: Build and publish draft release
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Confirm every asset uploaded
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The updater needs all three. A missing blockmap silently downgrades
+          # every client to full ~100 MB downloads instead of differential ones.
+          $h = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+          $url = "https://api.github.com/repos/${{ github.repository }}/releases"
+          $rel = Invoke-RestMethod $url -Headers $h |
+                 Where-Object { $_.tag_name -eq "${{ github.ref_name }}" } |
+                 Select-Object -First 1
+          if (-not $rel) { Write-Error "No release found for tag ${{ github.ref_name }}"; exit 1 }
+
+          $names = $rel.assets.name
+          Write-Host "Assets: $($names -join ', ')"
+
+          $missing = @('.exe', '.exe.blockmap', 'latest.yml') | Where-Object {
+            $suffix = $_
+            -not ($names | Where-Object { $_.EndsWith($suffix) })
+          }
+          if ($missing) { Write-Error "Missing from the release: $($missing -join ', ')"; exit 1 }
+
+          Write-Host "All required assets present. Publish the draft when ready:"
+          Write-Host $rel.html_url
+
+      - name: Keep the installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ github.ref_name }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+          retention-days: 14

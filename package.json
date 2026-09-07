@@ -10,6 +10,7 @@
   },
   "main": "main.js",
   "scripts": {
+    "test": "node --test test/*.test.js",
     "start": "electron .",
     "pack": "electron-builder --win --dir",
     "dist": "electron-builder --win --publish never",
@@ -24,6 +25,7 @@
     },
     "files": [
       "main.js",
+      "alerts.js",
       "preload.js",
       "vip.html",
       "audio.html",

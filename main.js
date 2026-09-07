@@ -2,12 +2,13 @@
 
 const {
   app, BrowserWindow, Tray, Menu, shell, session, powerMonitor, nativeImage,
-  powerSaveBlocker, Notification, ipcMain, dialog, screen
+  powerSaveBlocker, Notification, ipcMain, dialog, screen, clipboard
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const log = require('electron-log');
 const { autoUpdater } = require('electron-updater');
+const { pickAlertSound } = require('./alerts');
 
 const CHAT_URL = 'https://chat.google.com';
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -256,6 +257,8 @@ const DEFAULT_CONFIG = {
   privateMode: false,
   autoUpdate: true,
   vipSounds: {},
+  keywordSounds: {},
+  spellCheckLanguages: ['nl', 'en-US'],
   bounds: null,
   maximized: false
 };
@@ -379,14 +382,17 @@ async function updateBadgeUI(count) {
 // ---------------------------------------------------------------------------
 // Notification sounds
 // ---------------------------------------------------------------------------
-async function playCustomSound(overrideSound = null) {
+async function playCustomSound(overrideSound = null, { urgent = false } = {}) {
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return;
 
   const soundToPlay = overrideSound || config.selectedSound;
   if (soundToPlay === 'default' || soundToPlay === 'none' || isIdle) return;
 
+  // Ordinary traffic is rate-limited so a busy room can't machine-gun you.
+  // A keyword hit is the case you specifically asked to be interrupted for,
+  // so it ignores the throttle.
   const now = Date.now();
-  if (now - lastSoundTime < 10000) return;
+  if (!urgent && now - lastSoundTime < 10000) return;
   lastSoundTime = now;
 
   try {
@@ -470,9 +476,11 @@ ipcMain.on('gcw:notification', (event, rawPayload) => {
   const title = String(payload.title || 'Google Chat');
   const body = String(payload.body || '');
 
-  const vipMatch = Object.entries(config.vipSounds)
-    .find(([vipName]) => vipName && title.toLowerCase().includes(vipName.toLowerCase()));
-  playCustomSound(vipMatch ? vipMatch[1] : null);
+  const alert = pickAlertSound({ title, body }, config);
+  if (alert.matched === 'keyword') {
+    log.info(`Keyword "${alert.term}" matched; alerting.`);
+  }
+  playCustomSound(alert.sound, { urgent: alert.urgent });
 
   if (!Notification.isSupported()) return;
 
@@ -480,11 +488,97 @@ ipcMain.on('gcw:notification', (event, rawPayload) => {
     title: config.privateMode ? 'New Message' : title,
     body: config.privateMode ? 'Content hidden for privacy' : body,
     icon: getResourcePath('icon.ico'),
-    silent: true
+    silent: true,
+    // Asks Windows to treat a keyword hit as high priority, so it is less
+    // likely to be quietly collapsed into the notification centre.
+    urgency: alert.matched === 'keyword' ? 'critical' : 'normal'
   });
   banner.on('click', () => showMainWindow());
   banner.show();
 });
+
+// ---------------------------------------------------------------------------
+// Spellcheck
+//
+// Chromium ships the dictionaries; Electron just needs to be told which to
+// load. Left alone it follows the system locale only, so a Dutch/English
+// workplace gets one of the two underlined as gibberish.
+// ---------------------------------------------------------------------------
+function applySpellCheckLanguages() {
+  const available = session.defaultSession.availableSpellCheckerLanguages;
+  const wanted = (config.spellCheckLanguages || []).filter((lang) => available.includes(lang));
+
+  try {
+    // An empty list is how Electron expresses "spellcheck off".
+    session.defaultSession.setSpellCheckerLanguages(wanted);
+    log.info(`Spellcheck: ${wanted.length ? wanted.join(', ') : 'disabled'}`);
+  } catch (err) {
+    log.warn('Could not set spellcheck languages:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Right-click menu
+//
+// Electron provides none of this by default: without it there is no Cut, Copy,
+// Paste or spelling correction anywhere in the app, which is a strange thing to
+// discover in something you type in all day.
+// ---------------------------------------------------------------------------
+function attachContextMenu(webContents) {
+  webContents.on('context-menu', (event, params) => {
+    const template = [];
+    const { editFlags } = params;
+
+    for (const suggestion of params.dictionarySuggestions) {
+      template.push({
+        label: suggestion,
+        click: () => webContents.replaceMisspelling(suggestion)
+      });
+    }
+    if (params.dictionarySuggestions.length > 0) template.push({ type: 'separator' });
+
+    if (params.misspelledWord) {
+      template.push({
+        label: 'Add to dictionary',
+        click: () => session.defaultSession.addWordToSpellCheckerDictionary(params.misspelledWord)
+      });
+      template.push({ type: 'separator' });
+    }
+
+    if (params.linkURL) {
+      template.push(
+        { label: 'Open link in browser', click: () => shell.openExternal(params.linkURL) },
+        { label: 'Copy link address', click: () => clipboard.writeText(params.linkURL) },
+        { type: 'separator' }
+      );
+    }
+
+    if (params.mediaType === 'image' && params.srcURL) {
+      template.push(
+        { label: 'Copy image', click: () => webContents.copyImageAt(params.x, params.y) },
+        { label: 'Copy image address', click: () => clipboard.writeText(params.srcURL) },
+        { type: 'separator' }
+      );
+    }
+
+    template.push(
+      { label: 'Cut', role: 'cut', enabled: editFlags.canCut },
+      { label: 'Copy', role: 'copy', enabled: editFlags.canCopy },
+      { label: 'Paste', role: 'paste', enabled: editFlags.canPaste },
+      { type: 'separator' },
+      { label: 'Select all', role: 'selectAll', enabled: editFlags.canSelectAll }
+    );
+
+    if (!app.isPackaged) {
+      template.push(
+        { type: 'separator' },
+        { label: 'Inspect element', click: () => webContents.inspectElement(params.x, params.y) }
+      );
+    }
+
+    Menu.buildFromTemplate(template).popup();
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Navigation policy
@@ -597,6 +691,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false,
+      spellcheck: true,
       preload: path.join(__dirname, 'preload.js')
     }
   });
@@ -607,6 +702,9 @@ function createWindow() {
   session.defaultSession.setPermissionRequestHandler(
     (wc, permission, callback) => callback(permission === 'notifications')
   );
+
+  applySpellCheckLanguages();
+  attachContextMenu(mainWindow.webContents);
 
   mainWindow.once('ready-to-show', () => {
     if (!launchedHidden) mainWindow.show();
@@ -860,13 +958,24 @@ function updateMenuLabel() {
 }
 
 // ---------------------------------------------------------------------------
-// VIP manager IPC
+// Alerts manager IPC
 // ---------------------------------------------------------------------------
-ipcMain.handle('get-vips', () => ({ vips: config.vipSounds, sounds: listSounds() }));
+ipcMain.handle('get-vips', () => ({
+  vips: config.vipSounds,
+  keywords: config.keywordSounds,
+  sounds: listSounds()
+}));
 
 ipcMain.on('save-vips', (event, newVips) => {
   if (!newVips || typeof newVips !== 'object') return;
   config.vipSounds = newVips;
+  saveConfig();
+  updateTrayMenu();
+});
+
+ipcMain.on('save-keywords', (event, newKeywords) => {
+  if (!newKeywords || typeof newKeywords !== 'object') return;
+  config.keywordSounds = newKeywords;
   saveConfig();
   updateTrayMenu();
 });
@@ -893,16 +1002,26 @@ ipcMain.handle('upload-sound', async () => {
   }
 });
 
+let vipWindow = null;
+
 function openVipManager() {
-  const vipWin = new BrowserWindow({
-    width: 480,
-    height: 680,
-    title: 'VIP Sounds Manager',
+  if (vipWindow && !vipWindow.isDestroyed()) {
+    vipWindow.show();
+    vipWindow.focus();
+    return;
+  }
+
+  vipWindow = new BrowserWindow({
+    width: 520,
+    height: 760,
+    title: 'Alert Sounds',
     autoHideMenuBar: true,
     icon: getResourcePath('icon.ico'),
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
-  vipWin.loadFile('vip.html');
+  vipWindow.loadFile('vip.html');
+  attachContextMenu(vipWindow.webContents);
+  vipWindow.on('closed', () => { vipWindow = null; });
 }
 
 // ---------------------------------------------------------------------------
@@ -947,11 +1066,29 @@ function updateTrayMenu() {
     click: () => { config.idleTimeout = value; saveConfig(); updateTrayMenu(); }
   }));
 
+  const sameLanguages = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const spellCheckTemplate = [
+    { label: 'Nederlands + English', value: ['nl', 'en-US'] },
+    { label: 'Nederlands only', value: ['nl'] },
+    { label: 'English only', value: ['en-US'] },
+    { label: 'Off', value: [] }
+  ].map(({ label, value }) => ({
+    label,
+    type: 'radio',
+    checked: sameLanguages(config.spellCheckLanguages || [], value),
+    click: () => {
+      config.spellCheckLanguages = value;
+      saveConfig();
+      applySpellCheckLanguages();
+      updateTrayMenu();
+    }
+  }));
+
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Google Chat', click: showMainWindow },
     { label: 'Reload App', click: () => { reloadAttempt = 0; loadChat(); } },
     { type: 'separator' },
-    { label: '👤 Manage VIP Sounds', click: openVipManager },
+    { label: '🔔 Manage Alert Sounds', click: openVipManager },
     { type: 'separator' },
     {
       label: 'Private Notifications (Hide Text)',
@@ -988,6 +1125,7 @@ function updateTrayMenu() {
     { type: 'separator' },
     { label: 'Default Notification Sound', submenu: soundMenuTemplate },
     { label: 'Idle Timeout (Away)', submenu: idleMenuTemplate },
+    { label: 'Spellcheck', submenu: spellCheckTemplate },
     { type: 'separator' },
     { label: `Version ${app.getVersion()}`, enabled: false },
     {

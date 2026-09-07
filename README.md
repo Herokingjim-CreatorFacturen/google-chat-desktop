@@ -1,7 +1,27 @@
 # Google Chat Desktop
 
 An Electron wrapper around `chat.google.com` with native Windows notifications,
-per-person ("VIP") alert sounds, an unread taskbar badge, and automatic updates.
+an unread taskbar badge, and automatic updates.
+
+## Alerts
+
+Two kinds of rule, both managed from **🔔 Manage Alert Sounds** in the tray menu:
+
+* **Keyword alerts** match anywhere in the sender *or* the message text — your
+  own name, a project, "urgent". These are checked first, and they bypass the
+  ten-second sound throttle, because they are the case you specifically asked to
+  be interrupted for.
+* **VIP senders** match the sender only. Someone mentioning your boss is not
+  your boss messaging you.
+
+Both are plain substring matches, case-insensitive. The logic lives in
+[`alerts.js`](alerts.js) and is covered by `npm.cmd test`.
+
+Do **not** add a mute or Do Not Disturb toggle here. Google Chat's own DND
+already suppresses everything: sounds and banners are only ever raised from the
+notification hook, which fires when Google's page calls `Notification()`. Under
+DND it never does, so the wrapper goes quiet for free — and Google's version
+also sets your status, which a local toggle could not.
 
 ---
 
@@ -99,14 +119,37 @@ git config user.email "herokingjim@gmail.com"
 The version in `package.json` is the single source of truth. Everything — the
 installer filename, `latest.yml`, and the update check — derives from it.
 
+**Push a tag and let CI do it.** `.github/workflows/release.yml` builds on
+`windows-latest` and uploads to a draft release:
+
 ```powershell
 npm.cmd version patch
+git push --follow-tags
+```
+
+That is the whole release. No token in your shell, no execution-policy
+surprises, no chance of two local builds racing each other. The workflow uses
+the `GITHUB_TOKEN` that Actions mints per run, scoped to this repo only, so
+there is no personal access token to create, store, or renew.
+
+Before uploading it runs the tests and checks the tag matches `package.json` —
+a mislabelled release is worse than a failed one. Afterwards it verifies the
+`.exe`, `.exe.blockmap` and `latest.yml` all made it, and fails loudly if any
+are missing.
+
+Installed clients only see the update once you **publish the draft** by hand.
+
+### Releasing from your own machine
+
+Still supported, and needs a `GH_TOKEN` (see the Windows notes above):
+
+```powershell
 npm.cmd run release
 ```
 
-`npm.cmd run release` builds the NSIS installer and uploads `GoogleChat-Setup-<v>.exe`,
-`latest.yml`, and the `.blockmap` to a **draft** GitHub release. Installed clients
-only see the update once you publish that release.
+Run it **once** per version. Running it twice against the same version is what
+produced a release whose `latest.yml` described a different build than the
+uploaded installer, with the blockmap missing entirely.
 
 A draft is invisible to unauthenticated API calls, so "the release isn't there"
 usually just means it hasn't been published yet. To list drafts:
@@ -124,6 +167,7 @@ only the blocks that changed, not the full ~100 MB installer.
 
 | Command | What it does |
 | --- | --- |
+| `npm.cmd test` | Run the alert-matching tests. |
 | `npm.cmd start` | Run from source. Auto-update is disabled here by design. |
 | `npm.cmd run pack` | Build `dist/win-unpacked/` only — fast, no installer. |
 | `npm.cmd run dist` | Build the installer locally without uploading anything. |
@@ -201,10 +245,12 @@ Do that regularly. It is the main reason the auto-updater exists.
 | File | Role |
 | --- | --- |
 | `main.js` | Main process: window, tray, notifications, updater, settings. |
+| `alerts.js` | Decides which sound a notification plays. Pure, and unit-tested. |
 | `preload.js` | Isolated-world bridge that forwards notifications over IPC. |
 | `audio.html` | Hidden helper window: caches sounds, renders badge PNGs. |
 | `offline.html` | Shown while reconnecting after a failed load. |
-| `vip.html` | VIP sound manager UI. |
+| `vip.html` | Alert sounds UI — keyword alerts and VIP senders. |
+| `test/` | `node --test` suite. Run with `npm.cmd test`. |
 
 Settings and logs live in `%APPDATA%\Google Chat\`. The tray menu has an
 **Open Log Folder** item — ask for `main.log` when someone reports a problem.
