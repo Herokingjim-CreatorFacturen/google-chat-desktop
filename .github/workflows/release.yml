@@ -68,6 +68,40 @@ jobs:
           }
           Write-Host "Tag and package.json agree on $pkg"
 
+      # electron-builder runs one publisher per artifact, concurrently. Each asks
+      # GitHub "does a release for this tag exist?", both get told no, and both
+      # create one -- leaving two drafts sharing a tag with the assets split
+      # between them. Creating it ourselves first means every publisher finds
+      # the same existing release and just uploads into it.
+      - name: Create the draft release up front
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag  = "${{ steps.version.outputs.tag }}"
+          $ver  = "${{ steps.version.outputs.version }}"
+          $h    = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+          $base = "https://api.github.com/repos/${{ github.repository }}/releases"
+
+          $existing = @(Invoke-RestMethod $base -Headers $h | Where-Object { $_.tag_name -eq $tag })
+
+          if ($existing.Count -gt 1) {
+            Write-Error "Found $($existing.Count) releases already tagged $tag. Delete them and re-run."
+            exit 1
+          }
+
+          if ($existing.Count -eq 1) {
+            if (-not $existing[0].draft) {
+              Write-Error "$tag is already published. Bump the version instead of re-releasing over it."
+              exit 1
+            }
+            Write-Host "Reusing existing draft: $($existing[0].html_url)"
+          } else {
+            $body = @{ tag_name = $tag; name = $ver; draft = $true } | ConvertTo-Json
+            $made = Invoke-RestMethod $base -Method Post -Headers $h -Body $body
+            Write-Host "Created draft: $($made.html_url)"
+          }
+
       - name: Build and publish draft release
         run: npm run release
         env:
@@ -83,10 +117,21 @@ jobs:
           $tag = "${{ steps.version.outputs.tag }}"
           $h = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
           $url = "https://api.github.com/repos/${{ github.repository }}/releases"
-          $rel = Invoke-RestMethod $url -Headers $h |
-                 Where-Object { $_.tag_name -eq $tag } |
-                 Select-Object -First 1
-          if (-not $rel) { Write-Error "No release found for tag $tag"; exit 1 }
+          $all = @(Invoke-RestMethod $url -Headers $h | Where-Object { $_.tag_name -eq $tag })
+
+          if ($all.Count -eq 0) { Write-Error "No release found for tag $tag"; exit 1 }
+
+          # If duplicates reappear, say so plainly rather than leaving someone to
+          # guess which draft to keep and delete the one holding the blockmap.
+          if ($all.Count -gt 1) {
+            Write-Error "Duplicate releases for $tag -- assets are split across them:"
+            foreach ($r in $all) {
+              Write-Host "  $($r.html_url) -> $(($r.assets.name) -join ', ')"
+            }
+            exit 1
+          }
+
+          $rel = $all[0]
 
           $assets = @($rel.assets)
           Write-Host ("Assets: " + (($assets | ForEach-Object {
