@@ -44,10 +44,23 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Verify the tag matches package.json
+      # package.json is the source of truth. On a tag push the tag must agree
+      # with it; on a manual run there is no tag to compare, so the expected
+      # release tag is derived from the version instead.
+      - name: Resolve version
+        id: version
         shell: pwsh
         run: |
           $pkg = (Get-Content package.json | ConvertFrom-Json).version
+          "version=$pkg" >> $env:GITHUB_OUTPUT
+          "tag=v$pkg"    >> $env:GITHUB_OUTPUT
+          Write-Host "package.json version: $pkg"
+
+      - name: Verify the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $pkg = "${{ steps.version.outputs.version }}"
           $tag = "${{ github.ref_name }}" -replace '^v', ''
           if ($tag -ne $pkg) {
             Write-Error "Tag $tag does not match package.json version $pkg. Refusing to publish a mislabelled release."
@@ -67,12 +80,13 @@ jobs:
         run: |
           # The updater needs all three. A missing blockmap silently downgrades
           # every client to full ~100 MB downloads instead of differential ones.
+          $tag = "${{ steps.version.outputs.tag }}"
           $h = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
           $url = "https://api.github.com/repos/${{ github.repository }}/releases"
           $rel = Invoke-RestMethod $url -Headers $h |
-                 Where-Object { $_.tag_name -eq "${{ github.ref_name }}" } |
+                 Where-Object { $_.tag_name -eq $tag } |
                  Select-Object -First 1
-          if (-not $rel) { Write-Error "No release found for tag ${{ github.ref_name }}"; exit 1 }
+          if (-not $rel) { Write-Error "No release found for tag $tag"; exit 1 }
 
           $names = $rel.assets.name
           Write-Host "Assets: $($names -join ', ')"
@@ -89,7 +103,7 @@ jobs:
       - name: Keep the installer as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: installer-${{ github.ref_name }}
+          name: installer-${{ steps.version.outputs.tag }}
           path: |
             dist/*.exe
             dist/*.blockmap

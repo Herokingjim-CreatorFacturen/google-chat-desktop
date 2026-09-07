@@ -139,6 +139,11 @@ are missing.
 
 Installed clients only see the update once you **publish the draft** by hand.
 
+> **If the first CI run fails with a 403**, the repository's default workflow
+> token is read-only. Settings → Actions → General → Workflow permissions →
+> **Read and write permissions**. Nothing else needs changing; the workflow
+> already requests `contents: write` for itself.
+
 ### Releasing from your own machine
 
 Still supported, and needs a `GH_TOKEN` (see the Windows notes above):
