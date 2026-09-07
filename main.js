@@ -575,6 +575,17 @@ function persistBounds() {
   saveConfig();
 }
 
+// 'resize' and 'move' fire continuously while a window is dragged, so writing
+// the settings file straight from the handler means hundreds of writes per drag.
+let boundsTimer = null;
+function persistBoundsSoon() {
+  if (boundsTimer) clearTimeout(boundsTimer);
+  boundsTimer = setTimeout(() => {
+    boundsTimer = null;
+    persistBounds();
+  }, 500);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     ...restoreBounds(),
@@ -682,10 +693,11 @@ function createWindow() {
   mainWindow.on('focus', clearBadges);
   mainWindow.on('restore', clearBadges);
   mainWindow.on('show', clearBadges);
-  mainWindow.on('resize', persistBounds);
-  mainWindow.on('move', persistBounds);
+  mainWindow.on('resize', persistBoundsSoon);
+  mainWindow.on('move', persistBoundsSoon);
 
   mainWindow.on('close', (event) => {
+    if (boundsTimer) { clearTimeout(boundsTimer); boundsTimer = null; }
     persistBounds();
     if (!isQuitting) {
       event.preventDefault();
