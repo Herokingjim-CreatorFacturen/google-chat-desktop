@@ -1,8 +1,77 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>Audio Speaker</title>
-  </head>
-  <body>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <title>Google Chat Helper</title>
+</head>
+<body>
+<script>
+// Hidden helper window. Two jobs, both of which used to be done badly:
+//
+//  1. Notification sounds. These used to be base64'd and injected into
+//     Google's own page on every single notification -- a ~270KB string
+//     through executeJavaScript each time, at the mercy of whatever the
+//     Chat page does to its audio context. Now each sound is handed over
+//     once and cached here as a ready-to-play Audio object.
+//
+//  2. Taskbar badge rendering. app.setBadgeCount() is a no-op on Windows
+//     (Electron marks it linux/darwin only), so the unread count is drawn
+//     here and passed back as a PNG for win.setOverlayIcon().
+
+const cache = new Map();
+
+/** Hand a sound over once; subsequent plays only need its name. */
+function loadSound(name, dataUrl) {
+  const audio = new Audio(dataUrl);
+  audio.preload = 'auto';
+  cache.set(name, audio);
+  return true;
+}
+
+function hasSound(name) {
+  return cache.has(name);
+}
+
+function playSound(name) {
+  const audio = cache.get(name);
+  if (!audio) return false;
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && p.catch) p.catch((e) => console.log('Audio play blocked:', e));
+    return true;
+  } catch (e) {
+    console.log('Audio error:', e);
+    return false;
+  }
+}
+
+/** Draw an unread-count badge and return it as a PNG data URL. */
+function makeBadge(count) {
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
+  ctx.fillStyle = '#d93025';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  const label = count > 9 ? '9+' : String(count);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold ' + (label.length > 1 ? 15 : 19) + 'px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, size / 2, size / 2 + 1);
+
+  return canvas.toDataURL('image/png');
+}
+</script>
+</body>
 </html>

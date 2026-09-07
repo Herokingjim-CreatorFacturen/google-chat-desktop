@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reconnecting…</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f4f9; color: #1f1f1f;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1b1b1b; color: #e8eaed; }
+      .sub { color: #9aa0a6 !important; }
+    }
+    .box { text-align: center; max-width: 360px; padding: 24px; }
+    .spinner {
+      width: 34px; height: 34px; margin: 0 auto 20px;
+      border: 3px solid rgba(128,128,128,.3); border-top-color: #0b57d0;
+      border-radius: 50%; animation: spin 900ms linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
+    .sub { font-size: 13px; color: #5f6368; line-height: 1.5; margin: 0; }
+    #next { margin-top: 14px; font-size: 12px; opacity: .75; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner"></div>
+    <h1>Can’t reach Google Chat</h1>
+    <p class="sub">You appear to be offline. This window will reconnect on its own as soon as the network is back — no need to restart.</p>
+    <p id="next"></p>
+  </div>
+  <script>
+    // The main process appends ?in=<seconds> so the countdown matches its backoff.
+    var secs = parseInt(new URLSearchParams(location.search).get('in') || '0', 10);
+    var el = document.getElementById('next');
+    function tick() {
+      if (!secs || secs <= 0) { el.textContent = 'Retrying…'; return; }
+      el.textContent = 'Next attempt in ' + secs + 's';
+      secs -= 1;
+      setTimeout(tick, 1000);
+    }
+    tick();
+  </script>
+</body>
+</html>

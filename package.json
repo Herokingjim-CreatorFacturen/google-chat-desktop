@@ -1,25 +1,71 @@
 {
-  "name": "google-Eddie-1.3.3",
-  "version": "1.3.2",
+  "name": "google-chat-desktop",
+  "productName": "Google Chat",
+  "version": "1.4.0",
+  "description": "Desktop wrapper for Google Chat with native notifications, VIP sounds and automatic updates.",
+  "author": "Jimmy de Heus",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CHANGE-ME/google-chat-desktop.git"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win"
+    "pack": "electron-builder --win --dir",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
   },
-"build": {
+  "build": {
     "appId": "com.yourname.googlechat",
-    "win": {
-      "icon": "icon.ico"
+    "productName": "Google Chat",
+    "artifactName": "GoogleChat-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist"
     },
+    "files": [
+      "main.js",
+      "preload.js",
+      "vip.html",
+      "audio.html",
+      "offline.html",
+      "package.json",
+      "node_modules/**/*"
+    ],
     "extraResources": [
       "icon.ico",
       "icon-alert.ico",
+      "badge-dot.png",
+      "badge-empty.png",
       "sounds/**/*"
     ],
-    "files": [
-      "main.js",
-      "vip.html",
-      "package.json"
+    "win": {
+      "icon": "icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Google Chat",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github"
+      }
     ]
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
   }
 }
