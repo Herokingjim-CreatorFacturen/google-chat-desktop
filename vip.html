@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>VIP Sounds Manager</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f4f9; padding: 20px; color: #1f1f1f; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    input, select, button { padding: 10px; margin-top: 5px; border-radius: 6px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; font-size: 14px; }
+    button { background: #0b57d0; color: white; border: none; cursor: pointer; font-weight: bold; margin-top: 15px; transition: 0.2s; }
+    button:hover { background: #0842a0; }
+    
+    .upload-btn { background: #188038; margin-bottom: 20px; }
+    .upload-btn:hover { background: #13652c; }
+
+    .vip-item { display: flex; justify-content: space-between; align-items: center; background: #f8f9fa; margin-top: 10px; padding: 12px; border-radius: 6px; border: 1px solid #e0e0e0; }
+    .delete-btn { background: #d93025; width: auto; margin: 0; padding: 6px 12px; font-size: 12px;}
+    .delete-btn:hover { background: #a50e0e; }
+  </style>
+</head>
+<body>
+  
+  <button type="button" class="upload-btn" onclick="uploadSound()">⬆️ Upload New .mp3 file</button>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Add a VIP Rule</h2>
+    <label>Coworker or Chat Name:</label>
+    <input type="text" id="name" placeholder="e.g., Boss Man, Jimmy, Team Alpha">
+    
+    <label style="display:block; margin-top:15px;">Select Sound File:</label>
+    <select id="soundSelect"></select>
+    
+    <button onclick="addVip()">Save VIP Assignment</button>
+  </div>
+
+  <h3 style="margin-top:25px;">Current VIPs</h3>
+  <div id="vipList"></div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    let currentVips = {};
+
+    async function init() {
+      const data = await ipcRenderer.invoke('get-vips');
+      currentVips = data.vips || {};
+      
+      const select = document.getElementById('soundSelect');
+      select.innerHTML = '';
+      if (data.sounds.length === 0) {
+        select.innerHTML = '<option value="">No .mp3 files uploaded yet!</option>';
+      } else {
+        data.sounds.forEach(sound => {
+          const opt = document.createElement('option');
+          opt.value = sound;
+          opt.innerHTML = sound;
+          select.appendChild(opt);
+        });
+      }
+      renderList();
+    }
+
+    async function uploadSound() {
+      const success = await ipcRenderer.invoke('upload-sound');
+      if (success) {
+        init(); // Instantly refresh the dropdown list so the new sound appears
+      }
+    }
+
+    function renderList() {
+      const list = document.getElementById('vipList');
+      list.innerHTML = '';
+      for (const [name, sound] of Object.entries(currentVips)) {
+        const div = document.createElement('div');
+        div.className = 'vip-item';
+        div.innerHTML = `
+          <div><strong>${name}</strong> <br> <small style="color: #555;">${sound}</small></div>
+          <button class="delete-btn" onclick="deleteVip('${name}')">Remove</button>
+        `;
+        list.appendChild(div);
+      }
+    }
+
+    function addVip() {
+      const name = document.getElementById('name').value.trim();
+      const sound = document.getElementById('soundSelect').value;
+      if (!name || !sound) return alert("Please enter a name and make sure a sound is selected!");
+      
+      currentVips[name] = sound;
+      ipcRenderer.send('save-vips', currentVips);
+      document.getElementById('name').value = ''; 
+      renderList();
+    }
+
+    function deleteVip(name) {
+      delete currentVips[name];
+      ipcRenderer.send('save-vips', currentVips);
+      renderList();
+    }
+
+    init();
+  </script>
+</body>
+</html>

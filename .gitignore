@@ -1,0 +1,18 @@
+# Build output
+dist/
+release/
+out/
+
+# Dependencies
+node_modules/
+
+# Logs / OS cruft
+*.log
+npm-debug.log*
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local secrets (GH_TOKEN for publishing, etc.)
+.env
+.env.local

@@ -1,0 +1,25 @@
+{
+  "name": "google-Eddie-1.3.3",
+  "version": "1.3.2",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+"build": {
+    "appId": "com.yourname.googlechat",
+    "win": {
+      "icon": "icon.ico"
+    },
+    "extraResources": [
+      "icon.ico",
+      "icon-alert.ico",
+      "sounds/**/*"
+    ],
+    "files": [
+      "main.js",
+      "vip.html",
+      "package.json"
+    ]
+  }
+}
