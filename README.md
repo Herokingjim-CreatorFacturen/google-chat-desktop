@@ -37,23 +37,50 @@ repo with no releases yet.
 >
 > This affects pushing only. Update clients always fetch over HTTPS regardless.
 
-### Still to do
+---
 
-**Create a GitHub token** with the `repo` scope and expose it as `GH_TOKEN`
-when publishing. `.env` is git-ignored; never commit it.
+## Windows notes — read these first
 
-This project is developed on Windows, so the commands below are **PowerShell**.
-`export` is a bash builtin and will fail here:
+This is developed and released on Windows/PowerShell. Two things bite every time
+if you forget them.
+
+**Use `npm.cmd`, not `npm`.** The PowerShell execution policy on this machine is
+`Restricted`, which refuses to load npm's `npm.ps1` wrapper:
+
+> `npm : File C:\Program Files\nodejs\npm.ps1 cannot be loaded because running
+> scripts is disabled on this system.`
+
+The `.cmd` batch wrapper isn't subject to the policy, so `npm.cmd run release`
+works with no security settings changed. (`Set-ExecutionPolicy -Scope CurrentUser
+RemoteSigned` would also fix it, but there's no need to touch that.)
+
+**`export` is bash, not PowerShell.** Set the publish token like this, quoted —
+unquoted, PowerShell tries to run the token as a command:
 
 ```powershell
-$env:GH_TOKEN = "your_token_here"
+$env:GH_TOKEN = "github_pat_..."
 ```
 
-That lasts for the current terminal only. To keep it across sessions:
+That lasts for the current window only, and the release must run in that same
+window. To persist it for future terminals:
 
 ```powershell
 [Environment]::SetEnvironmentVariable("GH_TOKEN", "your_token_here", "User")
 ```
+
+> **Keep the token out of your scrollback and history.** Pasting it on the
+> command line writes it to `(Get-PSReadLineOption).HistorySavePath` in plain
+> text, and into anything you screenshot. If one leaks, revoke it at
+> github.com/settings/personal-access-tokens and strip the history:
+>
+> ```powershell
+> $h = (Get-PSReadLineOption).HistorySavePath
+> (Get-Content $h) | Where-Object { $_ -notmatch 'github_pat_' } | Set-Content $h
+> ```
+
+The token needs **Contents: Read and write** on this repository — nothing else.
+"Public repositories" access is read-only and will fail at the upload step with
+a 401.
 
 ---
 
@@ -62,14 +89,23 @@ That lasts for the current terminal only. To keep it across sessions:
 The version in `package.json` is the single source of truth. Everything — the
 installer filename, `latest.yml`, and the update check — derives from it.
 
-```bash
-npm version patch
-npm run release
+```powershell
+npm.cmd version patch
+npm.cmd run release
 ```
 
-`npm run release` builds the NSIS installer and uploads `GoogleChat-Setup-<v>.exe`,
+`npm.cmd run release` builds the NSIS installer and uploads `GoogleChat-Setup-<v>.exe`,
 `latest.yml`, and the `.blockmap` to a **draft** GitHub release. Installed clients
 only see the update once you publish that release.
+
+A draft is invisible to unauthenticated API calls, so "the release isn't there"
+usually just means it hasn't been published yet. To list drafts:
+
+```powershell
+$h = @{ Authorization = "Bearer $env:GH_TOKEN" }
+Invoke-RestMethod "https://api.github.com/repos/Herokingjim-CreatorFacturen/google-chat-desktop/releases" -Headers $h |
+  Select-Object tag_name, draft, @{n='assets';e={ $_.assets.name -join ', ' }}
+```
 
 Because the `.blockmap` is uploaded, updates are differential: clients download
 only the blocks that changed, not the full ~100 MB installer.
@@ -78,10 +114,10 @@ only the blocks that changed, not the full ~100 MB installer.
 
 | Command | What it does |
 | --- | --- |
-| `npm start` | Run from source. Auto-update is disabled here by design. |
-| `npm run pack` | Build `dist/win-unpacked/` only — fast, no installer. |
-| `npm run dist` | Build the installer locally without uploading anything. |
-| `npm run release` | Build and publish to GitHub Releases. |
+| `npm.cmd start` | Run from source. Auto-update is disabled here by design. |
+| `npm.cmd run pack` | Build `dist/win-unpacked/` only — fast, no installer. |
+| `npm.cmd run dist` | Build the installer locally without uploading anything. |
+| `npm.cmd run release` | Build and publish to GitHub Releases. |
 
 ---
 
@@ -142,8 +178,8 @@ easier signal to detect than the real version ever was.
 The durable defence is keeping Chromium current, which means keeping Electron
 current:
 
-```bash
-npm install --save-dev electron@latest
+```powershell
+npm.cmd install --save-dev electron@latest
 ```
 
 Do that regularly. It is the main reason the auto-updater exists.
