@@ -6,7 +6,7 @@
   "author": "Jimmy de Heus",
   "repository": {
     "type": "git",
-    "url": "https://github.com/herokingjim/google-chat-desktop.git"
+    "url": "git+https://github.com/Herokingjim-CreatorFacturen/google-chat-desktop.git"
   },
   "main": "main.js",
   "scripts": {
@@ -56,7 +56,9 @@
     },
     "publish": [
       {
-        "provider": "github"
+        "provider": "github",
+        "owner": "Herokingjim-CreatorFacturen",
+        "repo": "google-chat-desktop"
       }
     ]
   },

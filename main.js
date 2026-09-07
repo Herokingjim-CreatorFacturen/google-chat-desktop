@@ -757,13 +757,24 @@ function checkForUpdates({ interactive = false } = {}) {
   if (!config.autoUpdate && !interactive) return;
 
   autoUpdater.checkForUpdates().catch((err) => {
+    const message = String(err && err.message ? err.message : err);
+    if (message.includes('No published versions')) {
+      if (interactive) {
+        dialog.showMessageBox({
+          type: 'info',
+          title: 'Updates',
+          message: `You’re on the latest version (${app.getVersion()}).`
+        });
+      }
+      return;
+    }
     log.error('Update check failed:', err);
     if (interactive) {
       dialog.showMessageBox({
         type: 'error',
         title: 'Update check failed',
         message: 'Could not reach the update server.',
-        detail: String(err && err.message ? err.message : err)
+        detail: message
       });
     }
   });
@@ -797,8 +808,16 @@ function initAutoUpdater() {
     };
   });
   autoUpdater.on('error', (err) => {
+    const message = String(err && err.message ? err.message : err);
+    // A repo with no releases yet is a normal state, not a failure -- don't put
+    // a warning in the tray for it.
+    if (message.includes('No published versions')) {
+      log.info('No releases published yet; nothing to update to.');
+      setUpdateState('up-to-date');
+      return;
+    }
     log.error('Auto-update error:', err);
-    setUpdateState('error', { message: String(err && err.message ? err.message : err) });
+    setUpdateState('error', { message });
   });
 
   autoUpdater.on('update-downloaded', (info) => {

@@ -8,35 +8,41 @@ per-person ("VIP") alert sounds, an unread taskbar badge, and automatic updates.
 ## One-time setup before the first release
 
 Automatic updates fetch from **GitHub Releases** at
-`github.com/herokingjim/google-chat-desktop`.
+[Herokingjim-CreatorFacturen/google-chat-desktop](https://github.com/Herokingjim-CreatorFacturen/google-chat-desktop)
+— a public repo, so installed copies can read releases anonymously with no token
+embedded in the app.
 
 ### Already done
 
-* `repository.url` in `package.json` points at that repo.
-* The `origin` git remote is set to match.
+* `build.publish` names the owner and repo explicitly, so nothing depends on
+  parsing the git remote.
+* `repository.url` matches.
+* The `origin` remote is set, and the local branch is `main` to match the repo's
+  default.
 
-`electron-builder` reads `repository.url` to write `app-update.yml` into the
-installer, which is what tells an installed copy where to look. The two must stay
-in agreement — if they drift, every client silently 404s on its update check.
+Verified against the live repo: the packaged app reaches it and reports
+*"No published versions"* rather than a 404, which is the correct response to a
+repo with no releases yet.
 
 ### Still to do
 
-**1. Create the repository.** It does not exist yet:
+**1. Push the code.** The repo is currently empty:
 
 ```bash
-git push -u origin master
+git push -u origin main
 ```
 
-That prompts for GitHub credentials and creates nothing on its own — create
-`google-chat-desktop` on github.com first, then push.
+> **On transport:** you supplied the `git@github.com:` SSH address, but this
+> machine has no SSH keys (`ssh -T git@github.com` → *Permission denied
+> (publickey)*), so `origin` is set to HTTPS instead — Git Credential Manager is
+> already configured and will handle the sign-in. To switch to SSH later,
+> generate a key, add it to GitHub, then:
+> ```bash
+> git remote set-url origin git@github.com:Herokingjim-CreatorFacturen/google-chat-desktop.git
+> ```
+> This only affects pushing. Clients always fetch updates over HTTPS regardless.
 
-**2. Decide public or private.** Installed copies fetch release assets
-anonymously, so a **public** repo is the path of least resistance. The installer
-contains no secrets. A private repo means embedding a read token in the shipped
-app — at which point an internal HTTPS server with the `generic` provider is the
-better trade.
-
-**3. Create a GitHub token** with the `repo` scope and expose it as `GH_TOKEN`
+**2. Create a GitHub token** with the `repo` scope and expose it as `GH_TOKEN`
 when publishing. `.env` is git-ignored; never commit it.
 
 ```bash
