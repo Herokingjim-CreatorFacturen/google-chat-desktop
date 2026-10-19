@@ -1,0 +1,128 @@
+name: Electron update
+
+# Keeps the app's built-in Chrome current without anyone having to remember.
+#
+# Google Chat shows "This version of Chrome is outdated" once the Chromium
+# inside Electron falls a few majors behind. Chrome ships a major every two
+# weeks and Electron every eight, so the gap reopens by itself. Every morning
+# this asks scripts/electron-update.js whether it is time to move, and if so:
+# updates Electron, runs the tests, builds and launches the app, tags a new
+# version and publishes it. Installed copies then update themselves.
+#
+# When it ships is decided (and unit-tested) in scripts/electron-update.js: new
+# Electron majors as soon as they are two days old, same-major fixes at most
+# once a month.
+#
+# To run it by hand: Actions -> Electron update -> Run workflow. "Dry run" is
+# on by default there: every step runs except pushing and publishing. Give a
+# version under "target" to skip the timing rules, e.g. to ship a new major the
+# day it lands instead of two days later.
+#
+# If any step fails, nothing is pushed or published, GitHub emails whoever last
+# edited this schedule, and the next morning's run tries again.
+
+on:
+  schedule:
+    - cron: '0 5 * * *'   # 05:00 UTC = 06:00/07:00 in the Netherlands
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: check, build and launch, but push and publish nothing'
+        type: boolean
+        default: true
+      target:
+        description: 'Optional: move to this Electron version now, skipping the timing rules (e.g. 45.0.0)'
+        type: string
+        required: false
+
+concurrency:
+  group: electron-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      pushed: ${{ steps.push.outputs.pushed }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags, for the date of the last release
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Is there an Electron update to ship?
+        id: decide
+        env:
+          ELECTRON_TARGET: ${{ inputs.target }}
+        run: node scripts/electron-update.js
+
+      - name: Install dependencies
+        if: steps.decide.outputs.update == 'true'
+        run: npm ci
+
+      - name: Update Electron
+        if: steps.decide.outputs.update == 'true'
+        # npm saves this as ^x.y.z. A literal ^ here would be eaten by cmd.exe
+        # on its way through npm.cmd.
+        run: npm install --save-dev "electron@${{ steps.decide.outputs.target }}"
+
+      - name: Run tests
+        if: steps.decide.outputs.update == 'true'
+        run: npm test
+
+      - name: Build
+        if: steps.decide.outputs.update == 'true'
+        run: npm run pack
+
+      - name: Launch the built app
+        if: steps.decide.outputs.update == 'true'
+        run: npm run smoke
+
+      - name: Commit and tag the new version
+        id: bump
+        if: steps.decide.outputs.update == 'true'
+        shell: pwsh
+        env:
+          TARGET: ${{ steps.decide.outputs.target }}
+          CHROME: ${{ steps.decide.outputs.chrome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # pwsh carries on past a failing native command, so check each one.
+          git add package.json package-lock.json
+          git commit -m "Update Electron to $env:TARGET (Chromium $env:CHROME)"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          npm version patch
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          "tag=v$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Prepared v$ver"
+
+      # Pushes made with GITHUB_TOKEN never trigger other workflows, so this tag
+      # does not set off release.yml by itself; the release job below calls it.
+      - name: Push
+        id: push
+        if: steps.decide.outputs.update == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        run: |
+          git push --atomic origin HEAD:main "${{ steps.bump.outputs.tag }}"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "pushed=true" >> $env:GITHUB_OUTPUT
+
+  release:
+    needs: update
+    if: needs.update.outputs.pushed == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.update.outputs.tag }}
+      publish: true

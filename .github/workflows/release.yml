@@ -8,17 +8,30 @@ name: Release
 #
 # No personal access token is involved: GITHUB_TOKEN is minted per run by
 # Actions and is scoped to this repository alone.
+#
+# electron-update.yml also calls this, with `publish: true`: that is the one
+# path that publishes without a person pressing the button.
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Tag to build, e.g. v1.4.4'
+        type: string
+        required: true
+      publish:
+        description: 'Publish the release instead of leaving a draft'
+        type: boolean
+        default: false
 
 # Two builds of the same version racing each other is how the 1.4.1 release
 # ended up with a mismatched manifest and no blockmap. Queue them instead.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -31,6 +44,9 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          # When called, github.ref is the caller's branch, not the new tag.
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -57,11 +73,11 @@ jobs:
           Write-Host "package.json version: $pkg"
 
       - name: Verify the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/')
+        if: inputs.ref || startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $pkg = "${{ steps.version.outputs.version }}"
-          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $tag = "${{ inputs.ref || github.ref_name }}" -replace '^v', ''
           if ($tag -ne $pkg) {
             Write-Error "Tag $tag does not match package.json version $pkg. Refusing to publish a mislabelled release."
             exit 1
@@ -177,3 +193,22 @@ jobs:
             dist/*.blockmap
             dist/latest.yml
           retention-days: 14
+
+      # Only the scheduled Electron update asks for this, and only after the
+      # asset check above has passed. A tag pushed by hand still stops at a
+      # draft for a person to check.
+      - name: Publish the release
+        if: inputs.publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag  = "${{ steps.version.outputs.tag }}"
+          $h    = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+          $base = "https://api.github.com/repos/${{ github.repository }}/releases"
+          $rel  = @(Invoke-RestMethod $base -Headers $h | Where-Object { $_.tag_name -eq $tag })[0]
+
+          $body = @{ draft = $false; make_latest = 'true' } | ConvertTo-Json
+          $done = Invoke-RestMethod "$base/$($rel.id)" -Method Patch -Headers $h -Body $body
+          if ($done.draft) { Write-Error "GitHub still lists $tag as a draft."; exit 1 }
+          Write-Host "Published: $($done.html_url)"

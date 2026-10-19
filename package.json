@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.js",
     "start": "electron .",
     "pack": "electron-builder --win --dir",
+    "smoke": "node scripts/smoke-test.js",
     "dist": "electron-builder --win --publish never",
     "release": "electron-builder --win --publish always"
   },

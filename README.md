@@ -138,6 +138,8 @@ a mislabelled release is worse than a failed one. Afterwards it verifies the
 are missing.
 
 Installed clients only see the update once you **publish the draft** by hand.
+(Electron updates are the exception: they release and publish themselves. See
+[Automatic Electron updates](#automatic-electron-updates).)
 
 > **If the first CI run fails with a 403**, the repository's default workflow
 > token is read-only. Settings → Actions → General → Workflow permissions →
@@ -175,6 +177,7 @@ only the blocks that changed, not the full ~100 MB installer.
 | `npm.cmd test` | Run the alert-matching tests. |
 | `npm.cmd start` | Run from source. Auto-update is disabled here by design. |
 | `npm.cmd run pack` | Build `dist/win-unpacked/` only — fast, no installer. |
+| `npm.cmd run smoke` | Launch that build on a throwaway profile and check it really starts. |
 | `npm.cmd run dist` | Build the installer locally without uploading anything. |
 | `npm.cmd run release` | Build and publish to GitHub Releases. |
 
@@ -235,13 +238,44 @@ request headers are generated from the actual engine and cannot be moved by
 easier signal to detect than the real version ever was.
 
 The durable defence is keeping Chromium current, which means keeping Electron
-current:
+current. That is now automatic — see below.
 
-```powershell
-npm.cmd install --save-dev electron@latest
-```
+---
 
-Do that regularly. It is the main reason the auto-updater exists.
+## Automatic Electron updates
+
+Google Chat shows *"This version of Chrome is outdated"* once the app's Chromium
+is a few majors behind real Chrome. Chrome ships a new major every **two** weeks
+and Electron every **eight**, so the gap reopens by itself.
+
+`.github/workflows/electron-update.yml` closes it every morning at 05:00 UTC.
+When there is something to ship it updates Electron, runs the tests, builds the
+app, **launches it** (`npm.cmd run smoke`), tags a new patch version and
+**publishes** it. Installed copies pick it up on their own. Nobody has to press
+anything.
+
+When it ships is decided in [`scripts/electron-update.js`](scripts/electron-update.js)
+and covered by `npm.cmd test`:
+
+* **New Electron major** (a newer Chrome, which is what clears the pop-up): as
+  soon as it is two days old. The two days let a broken `.0.0` get its hotfix.
+* **Fixes within the same major**: at most once a month after the last release.
+* **A new major due within three days**: it waits for that instead of shipping
+  twice in one week.
+
+If any step fails, nothing is pushed or published, GitHub emails you (as the
+person who last edited the schedule), and the next morning's run tries again.
+
+To run it by hand: **Actions → Electron update → Run workflow**. *Dry run* is
+ticked by default there and does everything except push and publish. Fill in
+*target* (e.g. `45.0.0`) to skip the timing rules and ship that version now.
+
+Manual releases still work as before and still stop at a draft. Only this
+workflow publishes by itself.
+
+> GitHub switches off scheduled workflows in a public repo after 60 days with
+> no commits. The monthly fix release normally counts as activity. If the
+> workflow ever shows as disabled under Actions, re-enable it there.
 
 ---
 
@@ -256,6 +290,7 @@ Do that regularly. It is the main reason the auto-updater exists.
 | `offline.html` | Shown while reconnecting after a failed load. |
 | `vip.html` | Alert sounds UI — keyword alerts and VIP senders. |
 | `test/` | `node --test` suite. Run with `npm.cmd test`. |
+| `scripts/` | Build-time only, not shipped: the Electron update check and the smoke test. |
 
 Settings and logs live in `%APPDATA%\Google Chat\`. The tray menu has an
 **Open Log Folder** item — ask for `main.log` when someone reports a problem.
