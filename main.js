@@ -525,6 +525,17 @@ function applySpellCheckLanguages() {
 // discover in something you type in all day.
 // ---------------------------------------------------------------------------
 function attachContextMenu(webContents) {
+  // Since Electron 44 clipboard writes are async; a rejection here would
+  // otherwise surface as an unhandled one with nothing in the log. Awaiting
+  // also copes with the synchronous version in older Electron.
+  const copyText = async (text) => {
+    try {
+      await clipboard.writeText(text);
+    } catch (err) {
+      log.warn('Could not copy to clipboard:', err);
+    }
+  };
+
   webContents.on('context-menu', (event, params) => {
     const template = [];
     const { editFlags } = params;
@@ -548,7 +559,7 @@ function attachContextMenu(webContents) {
     if (params.linkURL) {
       template.push(
         { label: 'Open link in browser', click: () => shell.openExternal(params.linkURL) },
-        { label: 'Copy link address', click: () => clipboard.writeText(params.linkURL) },
+        { label: 'Copy link address', click: () => copyText(params.linkURL) },
         { type: 'separator' }
       );
     }
@@ -556,7 +567,7 @@ function attachContextMenu(webContents) {
     if (params.mediaType === 'image' && params.srcURL) {
       template.push(
         { label: 'Copy image', click: () => webContents.copyImageAt(params.x, params.y) },
-        { label: 'Copy image address', click: () => clipboard.writeText(params.srcURL) },
+        { label: 'Copy image address', click: () => copyText(params.srcURL) },
         { type: 'separator' }
       );
     }
