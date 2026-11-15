@@ -1,12 +1,15 @@
 'use strict';
 
-// Launches the packed app (dist/win-unpacked, from `npm run pack`) and checks it
+// Launches the packed app (dist/win-unpacked from `npm run pack`, or the
+// win-unpacked folder given as the first argument) and checks it
 // actually starts on the Electron that is installed, before anything built from
 // it is published. Unit tests cannot catch an Electron upgrade that breaks the
 // app on launch; this can.
 //
 // It uses a throwaway profile, so it never touches a real signed-in one, and
 // runs alongside an installed copy without tripping the single-instance lock.
+// Passing --user-data-dir also stops the build from claiming the Windows
+// startup entry (see ownsStartupEntry in main.js).
 //
 // Passes once the main window has loaded a page and the notification hook went
 // in, and the Chromium reported in the log matches the user agent we send.
@@ -19,7 +22,8 @@ const { spawn, execFileSync } = require('child_process');
 const TIMEOUT_MS = 90 * 1000;
 
 const root = path.join(__dirname, '..');
-const exe = path.join(root, 'dist', 'win-unpacked', 'Google Chat.exe');
+const appDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'dist', 'win-unpacked');
+const exe = path.join(appDir, 'Google Chat.exe');
 const expectedElectron = require('../node_modules/electron/package.json').version;
 
 function fail(message, log) {

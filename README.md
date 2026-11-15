@@ -174,12 +174,18 @@ only the blocks that changed, not the full ~100 MB installer.
 
 | Command | What it does |
 | --- | --- |
-| `npm.cmd test` | Run the alert-matching tests. |
+| `npm.cmd test` | Run the unit tests (alert matching, link rules, update timing). |
 | `npm.cmd start` | Run from source. Auto-update is disabled here by design. |
 | `npm.cmd run pack` | Build `dist/win-unpacked/` only — fast, no installer. |
 | `npm.cmd run smoke` | Launch that build on a throwaway profile and check it really starts. |
 | `npm.cmd run dist` | Build the installer locally without uploading anything. |
 | `npm.cmd run release` | Build and publish to GitHub Releases. |
+
+Only the **installed** app writes the Windows startup entry. `npm.cmd start`,
+anything run from `dist\win-unpacked\` and the smoke test leave it alone.
+Before 1.4.5 they didn't, and a test build could quietly replace the real app
+at login. If Google Chat ever starts from the wrong place, quit it from the
+tray and start the installed one from the Start menu: it claims the entry back.
 
 ---
 
@@ -285,6 +291,7 @@ workflow publishes by itself.
 | --- | --- |
 | `main.js` | Main process: window, tray, notifications, updater, settings. |
 | `alerts.js` | Decides which sound a notification plays. Pure, and unit-tested. |
+| `navigation.js` | Which links stay in the app and which open the browser. Pure, and unit-tested. |
 | `preload.js` | Isolated-world bridge that forwards notifications over IPC. |
 | `audio.html` | Hidden helper window: caches sounds, renders badge PNGs. |
 | `offline.html` | Shown while reconnecting after a failed load. |

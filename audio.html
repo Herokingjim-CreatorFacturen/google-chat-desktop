@@ -32,6 +32,11 @@ function hasSound(name) {
   return cache.has(name);
 }
 
+/** Drop a cached sound, so a replaced file is read fresh on its next play. */
+function forgetSound(name) {
+  return cache.delete(name);
+}
+
 function playSound(name) {
   const audio = cache.get(name);
   if (!audio) return false;

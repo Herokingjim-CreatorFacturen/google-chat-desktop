@@ -2,13 +2,14 @@
 
 const {
   app, BrowserWindow, Tray, Menu, shell, session, powerMonitor, nativeImage,
-  powerSaveBlocker, Notification, ipcMain, dialog, screen, clipboard
+  Notification, ipcMain, dialog, screen, clipboard
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const log = require('electron-log');
 const { autoUpdater } = require('electron-updater');
 const { pickAlertSound } = require('./alerts');
+const { isGoogleHost, opensInApp } = require('./navigation');
 
 const CHAT_URL = 'https://chat.google.com';
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -181,6 +182,10 @@ migrateLegacyProfile();
 
 // ---------------------------------------------------------------------------
 // Anti-sleep switches -- Chat is useless if Chromium throttles it in the tray.
+//
+// These keep the app itself awake. It deliberately holds no power-save blocker:
+// 'prevent-app-suspension' kept the whole PC from ever going to sleep, and the
+// resume handler below already reconnects Chat after a sleep.
 // ---------------------------------------------------------------------------
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
@@ -233,8 +238,10 @@ function listSounds() {
 }
 
 function resolveSoundPath(fileName) {
+  // Names come from the settings file; never let one reach outside the sound folders.
+  const name = path.basename(String(fileName));
   for (const dir of [getUserSoundsDir(), getBundledSoundsDir()]) {
-    const candidate = path.join(dir, fileName);
+    const candidate = path.join(dir, name);
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
@@ -297,7 +304,25 @@ const config = loadConfig();
 saveConfig();
 
 app.setAppUserModelId('com.yourname.googlechat');
-app.setLoginItemSettings({ openAtLogin: config.runAtStartup, args: ['--hidden'] });
+
+// Electron writes the Windows startup entry under the app id, whichever exe makes
+// the call. So a test build -- `npm start`, dist/win-unpacked, the smoke test --
+// used to quietly take over login from the installed app, which then never
+// started (or updated) again. Only the installed copy may touch it.
+function ownsStartupEntry() {
+  return app.isPackaged
+    && !process.argv.some((arg) => arg.startsWith('--user-data-dir'))
+    && !/[\\/]win-unpacked[\\/]/i.test(process.execPath);
+}
+
+function applyRunAtStartup() {
+  if (!ownsStartupEntry()) {
+    log.info('Not the installed copy; leaving the Windows startup entry alone.');
+    return;
+  }
+  app.setLoginItemSettings({ openAtLogin: config.runAtStartup, args: ['--hidden'] });
+}
+applyRunAtStartup();
 
 // ---------------------------------------------------------------------------
 // User agent
@@ -329,6 +354,11 @@ function createHelperWindow() {
   });
   helperWindow.loadFile('audio.html');
   helperWindow.on('closed', () => { helperWindow = null; });
+  // Sounds and badges both depend on this page; if its renderer dies, bring it back.
+  helperWindow.webContents.on('render-process-gone', (event, details) => {
+    log.warn(`Helper window renderer went away (${details.reason}); reloading.`);
+    if (helperWindow && !helperWindow.isDestroyed()) helperWindow.reload();
+  });
 }
 
 async function helperEval(expression) {
@@ -489,9 +519,10 @@ ipcMain.on('gcw:notification', (event, rawPayload) => {
     body: config.privateMode ? 'Content hidden for privacy' : body,
     icon: getResourcePath('icon.ico'),
     silent: true,
-    // Asks Windows to treat a keyword hit as high priority, so it is less
-    // likely to be quietly collapsed into the notification centre.
-    urgency: alert.matched === 'keyword' ? 'critical' : 'normal'
+    // A keyword hit is the case the user asked to be interrupted for, so ask
+    // Windows to keep it on screen until dismissed instead of letting it slide
+    // into the notification centre. (`urgency` would do nothing: it is Linux-only.)
+    timeoutType: alert.matched === 'keyword' ? 'never' : 'default'
   });
   banner.on('click', () => showMainWindow());
   banner.show();
@@ -589,22 +620,6 @@ function attachContextMenu(webContents) {
 
     Menu.buildFromTemplate(template).popup();
   });
-}
-
-// ---------------------------------------------------------------------------
-// Navigation policy
-// ---------------------------------------------------------------------------
-function isGoogleHost(rawUrl) {
-  try {
-    const { hostname, protocol } = new URL(rawUrl);
-    if (protocol !== 'https:' && protocol !== 'http:') return false;
-    return hostname === 'google.com'
-      || hostname.endsWith('.google.com')
-      || hostname.endsWith('.googleusercontent.com')
-      || hostname === 'accounts.youtube.com';
-  } catch {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -709,9 +724,14 @@ function createWindow() {
 
   if (config.maximized) mainWindow.maximize();
 
-  session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === 'notifications');
+  // Notifications drive the whole app. Chat's own "Copy link" and copy-text
+  // buttons need clipboard writes, and videos and images need fullscreen; both
+  // were refused before, so those buttons silently did nothing. Everything else
+  // (camera, microphone, location, clipboard reading...) stays refused.
+  const allowed = new Set(['notifications', 'clipboard-sanitized-write', 'fullscreen']);
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed.has(permission));
   session.defaultSession.setPermissionRequestHandler(
-    (wc, permission, callback) => callback(permission === 'notifications')
+    (wc, permission, callback) => callback(allowed.has(permission))
   );
 
   applySpellCheckLanguages();
@@ -724,8 +744,11 @@ function createWindow() {
   loadChat();
 
   // Popups: keep Chat and sign-in in-window, send everything else to the browser.
+  // This used to match "chat.google.com" anywhere in the URL, so a link like
+  // https://example.com/?chat.google.com loaded a stranger's page into the app
+  // window, with no address bar to give it away.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.includes('chat.google.com') || url.includes('accounts.google.com')) {
+    if (opensInApp(url)) {
       mainWindow.loadURL(url);
       return { action: 'deny' };
     }
@@ -802,6 +825,12 @@ function createWindow() {
   mainWindow.on('focus', clearBadges);
   mainWindow.on('restore', clearBadges);
   mainWindow.on('show', clearBadges);
+
+  // Windows is shutting down or signing out: let the window close instead of
+  // hiding to the tray, so the app quits cleanly.
+  const sessionEnding = () => { isQuitting = true; };
+  mainWindow.on('query-session-end', sessionEnding);
+  mainWindow.on('session-end', sessionEnding);
   mainWindow.on('resize', persistBoundsSoon);
   mainWindow.on('move', persistBoundsSoon);
 
@@ -864,6 +893,9 @@ function checkForUpdates({ interactive = false } = {}) {
     return;
   }
   if (!config.autoUpdate && !interactive) return;
+  // Already staged: checking again only re-fetches it and repeats the "ready"
+  // banner every six hours. It installs on the next quit either way.
+  if (updateState.status === 'downloaded' && !interactive) return;
 
   autoUpdater.checkForUpdates().catch((err) => {
     const message = String(err && err.message ? err.message : err);
@@ -1001,9 +1033,12 @@ ipcMain.handle('upload-sound', async () => {
 
   try {
     const sourcePath = result.filePaths[0];
+    const name = path.basename(sourcePath);
     const soundsDir = getUserSoundsDir();
     fs.mkdirSync(soundsDir, { recursive: true });
-    fs.copyFileSync(sourcePath, path.join(soundsDir, path.basename(sourcePath)));
+    fs.copyFileSync(sourcePath, path.join(soundsDir, name));
+    // Replacing a sound with a same-named file must not keep playing the old one.
+    await helperEval(`forgetSound(${JSON.stringify(name)})`);
     updateTrayMenu();
     return true;
   } catch (err) {
@@ -1031,6 +1066,11 @@ function openVipManager() {
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   vipWindow.loadFile('vip.html');
+  // This window runs with Node integration, so it must never show anything but
+  // vip.html: a link or file dropped onto it would otherwise load with full access
+  // to the PC.
+  vipWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  vipWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   attachContextMenu(vipWindow.webContents);
   vipWindow.on('closed', () => { vipWindow = null; });
 }
@@ -1114,7 +1154,7 @@ function updateTrayMenu() {
       click: (item) => {
         config.runAtStartup = item.checked;
         saveConfig();
-        app.setLoginItemSettings({ openAtLogin: config.runAtStartup, args: ['--hidden'] });
+        applyRunAtStartup();
       }
     },
     {
@@ -1169,8 +1209,6 @@ app.on('before-quit', () => { isQuitting = true; });
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.whenReady().then(() => {
-  powerSaveBlocker.start('prevent-app-suspension');
-
   createHelperWindow();
   createWindow();
 

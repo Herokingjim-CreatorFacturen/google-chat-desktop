@@ -27,6 +27,7 @@
     "files": [
       "main.js",
       "alerts.js",
+      "navigation.js",
       "preload.js",
       "vip.html",
       "audio.html",
