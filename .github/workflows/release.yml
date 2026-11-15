@@ -43,13 +43,13 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # When called, github.ref is the caller's branch, not the new tag.
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -184,8 +184,11 @@ jobs:
           Write-Host "All required assets uploaded. Publish the draft when ready:"
           Write-Host $rel.html_url
 
+      # A convenience copy only; the release itself was verified above, so a
+      # hiccup here must not stop the scheduled update from publishing.
       - name: Keep the installer as a build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
+        continue-on-error: true
         with:
           name: installer-${{ steps.version.outputs.tag }}
           path: |
