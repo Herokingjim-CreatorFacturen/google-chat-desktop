@@ -445,6 +445,35 @@ async function playCustomSound(overrideSound = null, { urgent = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Banners
+//
+// A Notification that nothing references is garbage-collected while it is
+// still on screen, and its click handler goes with it: clicking the banner
+// then does nothing. So the newest ones are held here until clicked. 'close'
+// is no cue to let go -- on Windows it also fires when a banner times out
+// into the notification centre, where it can still be clicked.
+// ---------------------------------------------------------------------------
+const MAX_LIVE_BANNERS = 50;
+const liveBanners = new Set();
+
+function showBanner(options, onClick) {
+  const banner = new Notification(options);
+  const forget = () => liveBanners.delete(banner);
+  banner.on('click', () => {
+    forget();
+    onClick();
+  });
+  banner.on('failed', forget);
+
+  liveBanners.add(banner);
+  // A Set iterates oldest first.
+  if (liveBanners.size > MAX_LIVE_BANNERS) {
+    liveBanners.delete(liveBanners.values().next().value);
+  }
+  banner.show();
+}
+
+// ---------------------------------------------------------------------------
 // Notification capture
 //
 // The hook runs in the page's own (main) world, where Google's code lives. It
@@ -514,7 +543,7 @@ ipcMain.on('gcw:notification', (event, rawPayload) => {
 
   if (!Notification.isSupported()) return;
 
-  const banner = new Notification({
+  showBanner({
     title: config.privateMode ? 'New Message' : title,
     body: config.privateMode ? 'Content hidden for privacy' : body,
     icon: getResourcePath('icon.ico'),
@@ -523,9 +552,7 @@ ipcMain.on('gcw:notification', (event, rawPayload) => {
     // Windows to keep it on screen until dismissed instead of letting it slide
     // into the notification centre. (`urgency` would do nothing: it is Linux-only.)
     timeoutType: alert.matched === 'keyword' ? 'never' : 'default'
-  });
-  banner.on('click', () => showMainWindow());
-  banner.show();
+  }, () => showMainWindow());
 });
 
 // ---------------------------------------------------------------------------
@@ -966,13 +993,11 @@ function initAutoUpdater() {
     setUpdateState('downloaded', { version: info.version });
 
     if (Notification.isSupported()) {
-      const banner = new Notification({
+      showBanner({
         title: `Google Chat ${info.version} is ready`,
         body: 'Click to restart and finish updating, or it will install next time you quit.',
         icon: getResourcePath('icon.ico')
-      });
-      banner.on('click', installUpdateNow);
-      banner.show();
+      }, installUpdateNow);
     }
   });
 
